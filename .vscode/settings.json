@@ -1,4 +1,4 @@
 {
     "python.REPL.enableREPLSmartSend": false,
-    "markdown.validate.enabled": true
+    "markdown.validate.enabled": false
 }
