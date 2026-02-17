@@ -1,12 +1,4 @@
-import os
-import sys
-
 import numpy as np
-
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-
 import common.gridworld_render as render_helper
 
 
@@ -88,7 +80,3 @@ class GridWorld:
         renderer = render_helper.Renderer(self.reward_map, self.goal_state,
                                           self.wall_state)
         renderer.render_q(q, print_value)
-
-if __name__ == "__main__":
-    env = GridWorld()
-    env.render_v()
