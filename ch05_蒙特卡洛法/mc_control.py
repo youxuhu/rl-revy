@@ -1,7 +1,7 @@
 import numpy as np
 from collections import defaultdict
 from common.gridworld import GridWorld
-
+#避免贪婪只会访问一种状态，导致无法学习到其他状态的价值，因此引入epsilon-greedy策略，在选择动作时以epsilon的概率随机选择一个动作，以1-epsilon的概率选择当前估计最优的动作。
 def greedy_probs(Q, state, epsilon=0, action_size=4):
     qs = [Q[(state, action)] for action in range(action_size)]
     max_action = np.argmax(qs)
@@ -28,8 +28,9 @@ class McAgent:
         action_probs = self.pi[state]
         actions = list(action_probs.keys())
         probs = list(action_probs.values()) 
-        return np.random.choice(actions, p=probs)
+        return np.random.choice(actions, p=probs)#p参数是一个概率分布，表示每一个动作被选中的概率，必须满足所有概率之和为1.
     
+    # 向memory中添加(state, action, reward)数据，供后续更新使用
     def add(self, state, action, reward):
         data = (state, action, reward)
         self.memory.append(data)
