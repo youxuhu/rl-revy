@@ -247,3 +247,80 @@ if __name__ == "__main__":
 ```
 
 ## 6.4 Q学习
+对于异策略型的SARSA来说，目标策略和行为策略是不相同的，在其中需要使用重要性采样。如果可以我们尽量避免使用重要性采样，因为重要性采样会导致结果的不稳定。
+Q-learning便是解决方案，特点
+- 采用TD方法进行更新
+- 是异策略型
+- 不使用重要性采样
+
+我们可以知道：
+贝尔曼方程->SARSA
+贝尔曼最优方程->Q-learning 
+### 6.4.1 贝尔曼方程和SARSA
+$q_\pi(s,a)=\sum_{s'}(s'|s,a)[r(s,a,s')+\gamma\sum_{a'}\pi(a'|s')q\pi(s',a')]$
+在贝尔曼方程中，一下两点我们需要重点关注：
+- 基于环境的状态迁移概率p(s'|s,a)来考虑下一步的所有状态迁移。
+- 通过这能代理的策略$\pi$来考虑下一步的所有行动。
+
+$Q'(S_t,A_t)=Q(S_t,A_t)+\alpha[R_t+\gamma\max_aQ(S_{t+1},a)-Q(S_t,A_t)]$
+基于上式重复更新Q函数，最终就能接近最优策略的Q函数。
+### 6.4.3 Q-learning的实现
+```python
+from collections import defaultdict
+import numpy as np
+from common.gridworld import GridWorld
+from common.utils import greedy_probs
+
+class QLearningAgent:
+    def __init__(self):
+        self.gamma = 0.9
+        self.alpha = 0.8
+        self.epsilon = 0.1
+        self.action_size = 4
+
+        random_actions = {0: 0.25, 1: 0.25, 2: 0.25, 3: 0.25}
+        self.pi = defaultdict(lambda: random_actions)
+        self.b = defaultdict(lambda: random_actions)
+        self.Q = defaultdict(lambda: 0)
+
+    def get_action(self, state):
+        action_probs = self.b[state]
+        actions = list(action_probs.keys())
+        probs = list(action_probs.values())
+        return np.random.choice(actions, p=probs)
+
+    def update(self, state, action, reward, next_state, done):
+        if done:
+            next_q_max = 0
+        else:
+            next_qs = [self.Q[next_state, a] for a in range(self.action_size)]
+            next_q_max = max(next_qs)
+
+        target = reward + self.gamma * next_q_max
+        self.Q[state, action] += (target - self.Q[state, action]) * self.alpha
+
+        self.pi[state] = greedy_probs(self.Q, state, epsilon=0)
+        self.b[state] = greedy_probs(self.Q, state, self.epsilon)
+
+
+env = GridWorld()
+agent = QLearningAgent()
+
+episodes = 10000
+for episode in range(episodes):
+    state = env.reset()
+
+    while True:
+        action = agent.get_action(state)
+        next_state, reward, done = env.step(action)
+
+        agent.update(state, action, reward, next_state, done)
+        if done:
+            break
+        state = next_state
+
+env.render_q(agent.Q)
+
+```
+
+## 6.5 分布模型与样本模型
