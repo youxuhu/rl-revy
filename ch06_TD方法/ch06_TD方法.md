@@ -90,4 +90,160 @@ $Q'_\pi(S_t,A_t)=Q_\pi(S_t,A_t)+\alpha[R_t+\gamma Q_\pi(S_{t+1},A_{t+1})-Q_\pi(S
 
 ### 6.2.2 SARSA的实现
 ```python
+
+from collections import defaultdict, deque
+import numpy as np
+from common.utils import greedy_probs
+from common.gridworld import GridWorld
+
+class SarsaAgent:
+    def __init__(self):
+        self.gamma = 0.9
+        self.alpha = 0.8
+        self.epsilon = 0.1
+        self.action_size = 4
+
+        random_action = {0:0.25, 1:0.25, 2:0.25, 3:0.25}
+        self.pi = defaultdict(lambda: random_action)
+        self.Q = defaultdict(lambda: 0)
+        self.memory = deque(maxlen=2)#使用deque，deque的使用方法和列表相同，但是如果添加maxlen参数，那么在添加元素是，如果超过了最大长度，那么会先进先出（队列）。
+
+    def get_action(self, state):
+        action_probs = self.pi[state] #从pi中选择行动
+        actions = list(action_probs.keys())
+        probs = list(action_probs.values())
+        return np.random.choice(actions, p=probs)
+    
+    def reset(self):
+        self.memory.clear()
+    
+    def update(self, state, action, reward, done):
+        self.memory.append((state, action, reward, done))
+        if len(self.memory)<2:
+            return
+
+        state, action, reward, done = self.memory[0]
+        next_state, next_action, _, _ = self.memory[1]
+        #下一个Q函数
+        next_q = 0 if done else self.Q[(next_state, next_action)]
+        #使用TD方法进行更新
+        target = reward + self.gamma * next_q
+        self.Q[state, action] += (target -self.Q[state, action])*self.alpha
+        #策略的改进
+        self.pi[state] = greedy_probs(self.Q, state, self.epsilon)
+
+
+if __name__ == "__main__":
+    env = GridWorld()
+    agent = SarsaAgent()
+
+    episodes = 1000
+    for episode in range(episodes):
+        state = env.reset()
+        agent.reset()
+
+        while True:
+            action = agent.get_action(state)
+            next_state, reward, done = env.step(action)
+
+            agent.update(state, action, reward, done)
+
+            if done:
+                agent.update(next_state, None, None, None)#到达目标时的调用，因为action和reward都将没有，所以传入None。
+                break
+            state = next_state
+    
+    env.render_q(agent.Q)   
 ```
+
+## 6.3 异策略型的SARSA
+### 6.3.1 异策略型和重要性采样
+在异策略型中，智能代理拥有两种策略，即行为策略和目标策略。智能代理首先会居于行为策略，通过采取各种行动收集大量数据，然后再通过使用样本数据贪婪的更新目标策略。
+需要注意以下两点：
+- 如果行为策略和目标策略概率分布相似，则结果会更稳定（方差更小）。考虑到这一点我们使用当前的Q函数的行为策略进行$\epsilon-greedy$更新，对目标策略使用贪婪更新。
+- 由于两种策略不同，因此我们使用重要性采样来校正权重$\rho$
+
+考虑更新Q函数的式子：
+$Q'_\pi(S_t,A_t)=Q_\pi(S_t,A_t)+\alpha[R_t+\gamma Q_\pi(S_{t+1},A_{t+1})-Q_\pi(S_t,A_t)]$
+
+在异策略型中，我们需要使用重要性采样来校正权重$\rho$，因此更新式子为：
+$Q'_\pi(S_t,A_t)=Q_\pi(S_t,A_t)+\alpha\rho[R_t+\gamma Q_\pi(S_{t+1},A_{t+1})-Q_\pi(S_t,A_t)]$
+其中$\rho$的定义为：
+$\rho=\frac{\pi(A_t|S_t)}{b(A_t|S_t)}$
+其中$\pi$是目标策略，$b$是行为策略。
+
+### 6.3.2 异策略型SARSA的实现
+```python
+from collections import defaultdict, deque
+import numpy as np
+from common.utils import greedy_probs
+from common.gridworld import GridWorld
+
+class SarsaOffPolicy:
+    def __init__(self):
+        self.gamma = 0.9
+        self.alpha = 0.8
+        self.epsilon = 0.1
+        self.action_size = 4
+
+        random_action = {0:0.25, 1:0.25, 2:0.25, 3:0.25}
+        self.pi = defaultdict(lambda: random_action)
+        self.b = defaultdict(lambda: random_action)
+        self.Q = defaultdict(lambda: 0)
+        self.memory = deque(maxlen = 2)
+    
+    def get_action(self, state):
+        action_probs = self.b[state]
+        actions = list(action_probs.keys())
+        probs = list(action_probs.values())
+        return np.random.choice(actions, p=probs)
+    
+    def reset(self):
+        self.memory.clear()
+
+    def update(self, state, action, reward, done):
+        self.memory.append((state, action, reward, done))
+        if len(self.memory)<2:
+            return
+        
+        state, action, reward, done = self.memory[0]
+        next_state, next_action, _, _ = self.memory[1]
+
+        if done:
+            next_q = 0
+            rho = 0
+        else:
+            next_q = self.Q[next_state, next_action]
+            rho = self.pi[next_state][next_action] / self.b[next_state][next_action]
+
+        target = rho*(reward + self.gamma * next_q)
+        self.Q[state, action] += (target -self.Q[state, action]) * self.alpha
+        self.pi[state] = greedy_probs(self.Q, state, action_size=self.action_size)# 对目标使用贪心算法
+        self.b[state] = greedy_probs(self.Q, state, self.epsilon, self.action_size)
+
+
+
+if __name__ == "__main__":
+    env = GridWorld()
+    agent = SarsaOffPolicy()
+
+    episodes = 1000
+    for episode in range(episodes):
+        state = env.reset()
+        agent.reset()
+
+        while True:
+            action = agent.get_action(state)
+            next_state, reward, done = env.step(action)
+
+            agent.update(state, action, reward, done)
+
+            if done:
+                agent.update(next_state, None, None, None)
+                break
+            state = next_state
+    
+    env.render_q(agent.Q)
+```
+
+## 6.4 Q学习
