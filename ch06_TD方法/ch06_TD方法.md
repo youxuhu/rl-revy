@@ -362,4 +362,37 @@ class RandomAgent:
 ### 6.5.2 样本模型版的Q-learning
 
 ```python
+
+from collections import defaultdict
+import numpy as np
+
+
+class QLearningAgent:
+    def __init__(self):
+        self.gamma = 0.9  # 折扣因子
+        self.alpha = 0.8
+        self.epsilon = 0.1
+        self.action_size = 4
+        self.Q = defaultdict(lambda: 0)
+
+    def get_action(self, state):
+        if np.random.rand() < self.epsilon:
+            return np.random.choice(self.action_size)
+        else:
+            qs = [self.Q[state, a] for a in range(self.action_size)]
+            return np.argmax(qs)
+
+    def update(self, state, action, reward, next_state, done):
+        if done:
+            next_q_max = 0
+        else:
+            next_qs = [self.Q[next_state, a] for a in range(self.action_size)]
+            next_q_max = np.argmax(next_qs)
+
+        target = self.gamma * next_q_max + reward
+        self.Q[state, action] += self.alpha * (target - self.Q[state, action])
+
 ```
+与之前的代码相比，删除了行为策略self.b。直接使用$\epsilon-greedy$选择行动。
+## 6.6 小结
+可以通过价值函数进行更新，TD方法比蒙特卡洛方法可以更加高效的更新价值函数。
