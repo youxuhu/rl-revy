@@ -286,4 +286,298 @@ if __name__ == "__main__":
         print(param)
     model.cleargrads()#清除梯度
 ```
+完整的两层神经网络
+```
 
+import numpy as np
+import common
+
+from dezero import Variable
+import dezero.functions as F
+import dezero.layers as L
+from dezero import Model
+
+if __name__ == "__main__":
+    np.random.seed(0)
+    x = np.random.rand(100, 1)
+    y = np.sin(2 * np.pi * x) + np.random.rand(100, 1)
+
+    lr = 0.2
+    iters = 10000
+
+    class TwoLayerNet(Model):
+        def __init__(self, hidden_size, out_size):
+            super().__init__()
+            self.l1 = L.Linear(hidden_size)
+            self.l2 = L.Linear(out_size)
+
+        def forward(self, x):
+            y = F.sigmoid(self.l1(x))
+            y = self.l2(y)
+            return y
+
+    model = TwoLayerNet(10, 1)
+    for i in range(iters):
+        y_pred = model.forward(x)
+        loss = F.mean_squared_error(y, y_pred)
+
+        model.cleargrads()
+        loss.backward()
+
+        for p in model.params():
+            p.data -= p.grad.data * lr
+        if i % 1000 == 0:
+            print('loss:',loss)
+    
+```
+使用优化器的两层神经网络
+```
+
+import numpy as np
+import common
+
+from dezero import Model
+import dezero.functions as F
+import dezero.layers as L
+from dezero import optimizers
+
+
+if __name__ == "__main__":
+    np.random.seed(0)
+    x = np.random.rand(100, 1)
+    y = np.sin(2 * np.pi * x) + np.random.rand(100, 1)
+
+    lr = 0.01
+    iters = 100000
+    class TwoLayerNet(Model):
+        def __init__(self, hidden_size, out_size):
+            super().__init__()
+            self.l1 = L.Linear(hidden_size)
+            self.l2 = L.Linear(out_size)
+            
+        def forward(self, x):
+            y = F.sigmoid(self.l1(x))
+            y = self.l2(y)
+            return y
+        
+    model = TwoLayerNet(10, 1)
+    optimizer = optimizers.Adam(lr)
+
+    optimizer.setup(model)
+
+    for i in range(iters):
+        y_pred = model(x)
+        loss = F.mean_squared_error(y, y_pred)
+
+        model.cleargrads()
+        loss.backward()
+
+        optimizer.update()
+        if i % 1000 == 0:
+            print('loss', loss.data)
+
+```
+
+
+## 7.4 Q学习和神经网络
+本章开始Q学习和神经网络的融合
+### 7.4.1 神经网络的预处理
+将3*4的网格世界转化为onehot编码
+```
+
+import numpy as np
+import common
+
+def one_hot(state):
+    HEIGHT, WIDTH = 3, 4
+    vec = np.zeros(HEIGHT*WIDTH, dtype = np.float64)
+    y, x = state
+    idx = WIDTH * y + x
+    vec[idx] = 1.0
+    return vec[np.newaxis, :]
+
+
+
+
+if __name__ == "__main__":
+    state = (2, 0)
+    x = one_hot(state)
+    print(x.shape)
+    print(x)    
+```
+我们通过vec[np.newaxis,:]添加了一个竖向的轴
+
+### 7.4.2 表示Q函数的神经网络
+典型的两种结构有：
+- 状态、行动两个输入，输出Q函数的值
+- 状态作为输入，输出多个行动
+
+对于第一种结构有多少个action就需要前向传播多少次，第二个结构将会更加的高效只需要一次前向传播就可以求得所有的行动价值函数Q
+
+我们现在实现第二种结构，只需要使用state作为输入参数
+
+```
+
+import numpy as np
+import common
+
+from dezero import Model
+import dezero.functions as F
+import dezero.layers as L
+from dezero import optimizers
+
+class QNet(Model):
+    def __init__(self):
+        super().__init__()
+        self.l1 = L.Linear(100)
+        self.l2 = L.Linear(4)
+
+    def forward(self, x):
+        y = F.relu(self.l1(x))
+        y = self.l2(y)
+        return y
+
+
+
+def one_hot(state):
+    HEIGHT, WIDTH = 3, 4
+    vec = np.zeros(HEIGHT*WIDTH, dtype = np.float64)
+    y, x = state
+    idx = WIDTH * y + x
+    vec[idx] = 1.0
+    return vec[np.newaxis, :]
+
+
+
+
+qnet = QNet()
+state = (2, 0)
+state = one_hot(state)
+
+qs = qnet.forward(state)
+print(qs.shape) #(1, 4)
+```
+
+
+### 7.4.3 神经网络和Q学习
+
+
+$Q(S_t, A_t) + \alpha[R_t+\gamma Q(S_{t+1}, A_{t+1}) -Q(S_t, A_t) ]$
+
+将更新目标当作T，那么T可以被视为正确答案的标签，由于T是标量值，所以可以被视为回归问题。
+```
+
+import numpy as np
+import common
+from common.gridworld import GridWorld
+import matplotlib.pyplot as plt
+
+from dezero import Model
+import dezero.functions as F
+import dezero.layers as L
+import dezero.optimizers as optimizers
+
+
+class QNet(Model):
+    def __init__(self):
+        super().__init__()
+        self.l1 = L.Linear(100)
+        self.l2 = L.Linear(4)
+
+    def forward(self, x):
+        y = F.relu(self.l1(x))
+        y = self.l2(y)
+        return y
+
+
+class QLearningAgent:
+    def __init__(self):
+        self.gamma = 0.9
+        self.lr = 0.01
+        self.epsilon = 0.1
+        self.action_size = 4
+
+        self.qnet = QNet()
+        self.optimizer = optimizers.SGD(self.lr)
+        self.optimizer.setup(self.qnet)
+    def get_action(self, state):
+        if np.random.rand() < self.epsilon:#探索，小于epsilon就随机，否则就贪婪
+            return np.random.choice(self.action_size)
+        else:
+            qs = self.qnet(state)
+            return qs.data.argmax()
+        
+
+    def update(self, state, action, reward, next_state, done):
+        if done:
+            next_q = np.zeros(1, dtype=np.float64)
+        else:
+            next_qs = self.qnet(next_state)
+            next_q = next_qs.max(axis=1)
+            next_q.unchain()
+
+        target = reward + self.gamma * next_q
+        qs = self.qnet(state)#前向传播
+        q = qs[:, action]
+        loss = F.mean_squared_error(target, q)
+
+        self.qnet.cleargrads()
+        loss.backward()
+        self.optimizer.update()
+
+        return loss.data
+
+def one_hot(state):
+    HEIGHT, WIDTH = 3, 4
+    vec = np.zeros(HEIGHT*WIDTH, dtype = np.float64)
+    y, x = state
+    idx = WIDTH * y + x
+    vec[idx] = 1.0
+    return vec[np.newaxis, :]
+
+
+def build_q_dict(agent, env):
+    q_dict = {}
+    for state in env.states():
+        qs = agent.qnet(one_hot(state)).data.flatten()
+        for action, q_value in enumerate(qs):
+            q_dict[(state, action)] = float(q_value)
+    return q_dict
+
+
+if __name__ == "__main__":
+    env = GridWorld()
+    agent = QLearningAgent()
+
+    episodes = 10000
+    loss_history = []
+
+    for episode in range(episodes):
+        state = env.reset()
+        state = one_hot(state)
+        total_loss, cnt = 0, 0
+        done = False
+
+        while not done:
+            action = agent.get_action(state)
+            next_state, reward, done = env.step(action)
+            next_state = one_hot(next_state)
+
+            loss = agent.update(state, action, reward, next_state, done)
+            total_loss += loss
+            cnt += 1
+            state = next_state
+
+        average_loss = total_loss / cnt
+        loss_history.append(average_loss)
+
+    plt.plot(loss_history)
+    plt.xlabel('episode')
+    plt.ylabel('loss')
+    plt.title('Q-Learning Loss')
+    plt.tight_layout()
+    plt.show()
+
+    q = build_q_dict(agent, env)
+    env.render_q(q)
+```
